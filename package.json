@@ -18,6 +18,18 @@
       {
         "command": "lint40.toggle",
         "title": "Toggle lint40"
+      },
+      {
+        "command": "lint40.generateFileHeader",
+        "title": "Generate File Header"
+      },
+      {
+        "command": "lint40.generateFuncContract",
+        "title": "Generate Function Contracts"
+      },
+      {
+        "command": "lint40.generateStructDoc",
+        "title": "Generate Struct Documentation"
       }
     ]
   },

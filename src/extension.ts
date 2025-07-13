@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { ContractGenerator } from './contractGenerator';
 
 const Parser = require('tree-sitter');
 const C = require('tree-sitter-c');
@@ -6,10 +7,16 @@ const C = require('tree-sitter-c');
 type ParserType = typeof Parser;
 type TreeType = any; 
 
+enum LintMode {
+    OFF = 'off',
+    DRAFT = 'draft', 
+    REVIEW = 'review'
+}
+
 export class Lint40Extension {
     private diagnosticCollection: vscode.DiagnosticCollection;
     private statusBarItem: vscode.StatusBarItem;
-    private isEnabled: boolean = true;
+    private currentMode : LintMode = LintMode.DRAFT;
     private parser: any;
     constructor() {
         this.diagnosticCollection = vscode.languages.createDiagnosticCollection('lint40');
@@ -34,23 +41,48 @@ export class Lint40Extension {
 
         // Listen for document changes
         const onDidChangeTextDocument = vscode.workspace.onDidChangeTextDocument(event => {
-            if (event.document.languageId === 'c' && this.isEnabled) {
-                this.lintDocument(event.document);
-            }
+        if (event.document.languageId === 'c' && this.currentMode !== LintMode.OFF) {
+            this.lintDocument(event.document);
+        }
         });
 
         // Listen for active editor changes
         const onDidChangeActiveTextEditor = vscode.window.onDidChangeActiveTextEditor(editor => {
-            if (editor && editor.document.languageId === 'c' && this.isEnabled) {
+            if (editor && editor.document.languageId === 'c' && this.currentMode !== LintMode.OFF) {
                 this.lintDocument(editor.document);
             }
         });
 
         context.subscriptions.push(onDidChangeTextDocument, onDidChangeActiveTextEditor);
 
-        if (vscode.window.activeTextEditor?.document.languageId === 'c' && this.isEnabled) {
+        if (vscode.window.activeTextEditor?.document.languageId === 'c' && this.currentMode !== LintMode.OFF) {
             this.lintDocument(vscode.window.activeTextEditor.document);
         }
+
+        const generateFileHeaderCommand = vscode.commands.registerCommand('lint40.generateFileHeader', () => {
+        if (vscode.window.activeTextEditor?.document.languageId === 'c') {
+                ContractGenerator.generateFileHeader(vscode.window.activeTextEditor.document);
+            }
+        });
+        context.subscriptions.push(generateFileHeaderCommand);
+        
+        const generateFuncContract = vscode.commands.registerCommand('lint40.generateFuncContract', () => {
+            if (vscode.window.activeTextEditor?.document.languageId === 'c') {
+                const text = vscode.window.activeTextEditor.document.getText();
+                const tree = this.parser.parse(text);
+                ContractGenerator.generateFuncContract(tree, vscode.window.activeTextEditor.document);
+            }
+        });
+        context.subscriptions.push(generateFuncContract);
+
+        const generateStructDoc = vscode.commands.registerCommand('lint40.generateStructDoc', () => {
+            if (vscode.window.activeTextEditor?.document.languageId === 'c') {
+                const text = vscode.window.activeTextEditor.document.getText();
+                const tree = this.parser.parse(text);
+                ContractGenerator.generateStructDoc(tree, vscode.window.activeTextEditor.document);
+            }
+        });
+        context.subscriptions.push(generateStructDoc);
     }
 
     private setupStatusBar() {
@@ -59,16 +91,51 @@ export class Lint40Extension {
         this.statusBarItem.show();
     }
 
+    // private updateStatusBar() {
+    //     const enabledText = this.isEnabled ? '$(check)' : '$(x)';
+    //     const modeText = this.isDraftMode ? 'Draft' : 'Review';
+    //     this.statusBarItem.text = `lint40: ${enabledText} | ${modeText}`;
+    //     this.statusBarItem.tooltip = `lint40 is ${this.isEnabled ? 'enabled' : 'disabled'}. Mode: ${modeText}. Click to toggle.`;
+    // }
     private updateStatusBar() {
-        this.statusBarItem.text = `lint40: ${this.isEnabled ? '$(check)' : '$(x)'}`;
-        this.statusBarItem.tooltip = `lint40 is ${this.isEnabled ? 'enabled' : 'disabled'}. Click to toggle.`;
+    let text: string;
+    let tooltip: string;
+    
+    switch (this.currentMode) {
+        case LintMode.DRAFT:
+            text = 'lint40: $(check) Draft';
+            tooltip = 'lint40 Draft Mode - basic checks only. Click to switch to Review.';
+            break;
+        case LintMode.REVIEW:
+            text = 'lint40: $(check) Review';
+            tooltip = 'lint40 Review Mode - all checks enabled. Click to turn off.';
+            break;
+        case LintMode.OFF:
+            text = 'lint40: $(x) Off';
+            tooltip = 'lint40 is disabled. Click to enable Draft mode.';
+            break;
     }
+    
+    this.statusBarItem.text = text;
+    this.statusBarItem.tooltip = tooltip;
+}
 
     private toggle() {
-        this.isEnabled = !this.isEnabled;
+        switch (this.currentMode) {
+        case LintMode.DRAFT:
+            this.currentMode = LintMode.REVIEW;
+            break;
+        case LintMode.REVIEW:
+            this.currentMode = LintMode.OFF;
+            break;
+        case LintMode.OFF:
+            this.currentMode = LintMode.DRAFT;
+            break;
+        }
+        
         this.updateStatusBar();
-
-        if (this.isEnabled) {
+        
+        if (this.currentMode !== LintMode.OFF) {
             vscode.workspace.textDocuments.forEach(doc => {
                 if (doc.languageId === 'c') {
                     this.lintDocument(doc);
@@ -79,52 +146,28 @@ export class Lint40Extension {
         }
     }
 
+    // private toggleMode() {
+    //     this.isDraftMode = !this.isDraftMode;
+    //     this.updateStatusBar();
+        
+    //     vscode.workspace.textDocuments.forEach(doc => {
+    //         if (doc.languageId === 'c') {
+    //             this.lintDocument(doc);
+    //         }
+    //     });
+    // }
+
     private stripComments(line: string): string {
-        // Remove single-line comments
         let cleaned = line.replace(/\/\/.*$/, '');
-        // Remove simple single-line block comments
         cleaned = cleaned.replace(/\/\*.*?\*\//g, '');
         return cleaned;
     }
 
     private lintDocument(document: vscode.TextDocument) {
-        if (!this.isEnabled) {
+        if (this.currentMode === LintMode.OFF) {
             return;
         }
-        // try {
-        // console.log('Starting lintDocument for:', document.uri.toString());
-        
-        // const diagnostics: vscode.Diagnostic[] = [];
-        // const text = document.getText();
-        
-    //     if (!text || text.trim().length === 0) {
-    //         console.log('Empty document, skipping');
-    //         this.diagnosticCollection.set(document.uri, []);
-    //         return;
-    //     }
-        
-    //     const tree = this.parser.parse(text);
-        
-    //     if (!tree || !tree.rootNode) {
-    //         console.error('Failed to parse document');
-    //         return;
-    //     }
-        
-    //     console.log('Parse successful, checking operators...');
-        
-    //     this.checkOperatorSpacing(tree, document, diagnostics);
-    //     this.checkBraceRules(tree, document, diagnostics);
-    //     this.checkBraceSpacing(text, diagnostics);
-    //     this.checkLineLength(text, diagnostics);
-    //     this.checkBooleanComparisons(text, diagnostics, document);
-    //     this.checkCommentStyle(text, diagnostics);
-        
-    //     this.diagnosticCollection.set(document.uri, diagnostics);
-        
-    // } catch (error) {
-    //     console.error('Error in lintDocument:', error);
-    //     this.diagnosticCollection.set(document.uri, []);
-    // }
+
         const diagnostics: vscode.Diagnostic[] = [];
         const text = document.getText();
         const lines = text.split('\n');
@@ -132,11 +175,47 @@ export class Lint40Extension {
         let prevLineEnds = true;
         
         const tree = this.parser.parse(text);
+
+        if (this.currentMode === LintMode.REVIEW) {
+            const trimmedlines = text.trim().split('\n');
+            if (!text.trim().startsWith(`/*`) && trimmedlines.length > 0) {
+                const diagnostic = new vscode.Diagnostic(
+                new vscode.Range(0, 0, 0, trimmedlines[0].length),
+                `This file is missing a header. Add documentation above.`,
+                vscode.DiagnosticSeverity.Information
+                );
+                diagnostic.code = 'documentation';
+                diagnostic.source = 'lint40';
+                diagnostics.push(diagnostic);
+                
+                
+            }
+            this.checkDocumentation(tree, document, diagnostics);
+        }
+
         this.checkOperatorSpacing(tree, document, diagnostics);
         this.checkBraceRules(tree, document, diagnostics);
+        this.checkGlobalVars(tree, document, diagnostics);
         
-        this.checkLineLength(text, diagnostics);
+        
+    
         lines.forEach((line, lineIndex) => {
+            const onlyWhitespaceRegex = /^\s+$/;
+            if (line.match(onlyWhitespaceRegex)) {
+                const range = new vscode.Range(lineIndex, 0, lineIndex, line.length);
+                const diagnostic = new vscode.Diagnostic(
+                    range,
+                    `Blank lines should not contain spaces or tabs`,
+                    vscode.DiagnosticSeverity.Information
+                );
+                diagnostic.code = 'blank-line-spaces';
+                diagnostic.source = 'lint40';
+                diagnostics.push(diagnostic);
+            }
+            if (this.currentMode === LintMode.REVIEW) {
+                this.checkCommentStyle(line, lineIndex, diagnostics);
+                // more to come...
+            }
             const trimmed = this.stripComments(line.trim());
             const isEmpty = trimmed === "";
             
@@ -188,13 +267,14 @@ export class Lint40Extension {
 
             const cleanLine = this.stripComments(line);
             this.checkPointerStyle(cleanLine, lineIndex, diagnostics);
-            this.checkCommentStyle(line, lineIndex, diagnostics);
             this.checkBraceSpacing(cleanLine, lineIndex, diagnostics);
             this.checkCommaSpacing(cleanLine, lineIndex, diagnostics);
             this.checkForLoopSpacing(cleanLine, line, lineIndex, diagnostics);
             this.checkKeywordSpacing(cleanLine, lineIndex, diagnostics); // check if redundant
             this.checkBooleanComparisons(cleanLine, lineIndex, diagnostics);
+            this.checkTrailing(line, lineIndex, diagnostics);
 
+            
             const cleanTrimmed = cleanLine.trim();
             prevLineEnds = /[;{})]\s*$/.test(cleanTrimmed);
         });
@@ -212,17 +292,11 @@ export class Lint40Extension {
             { name: 'conditional_expression', query: '(conditional_expression) @ternary' } // x ? y : z
         ];
         
-        for (const queryInfo of queries) {
-            console.log(`Checking ${queryInfo.name}...`);
-            
+        for (const queryInfo of queries) {            
             const query = new Parser.Query(C, queryInfo.query);
             const captures = query.captures(tree.rootNode);
-            
-            console.log(`Found ${queryInfo.name}:`, captures ? captures.length : 'none');
-            
-            for (const capture of captures) {
-                console.log(`${queryInfo.name} text:`, capture.node.text);
-                
+                    
+            for (const capture of captures) {                
                 this.checkOperatorsInNode(capture.node, text, document, diagnostics);
             }
         }
@@ -241,17 +315,13 @@ export class Lint40Extension {
                 continue;
             }
             
-            if (operatorsNeedingSpaces.includes(operatorText)) {
-                console.log('Found operator:', operatorText);
-                
+            if (operatorsNeedingSpaces.includes(operatorText)) {                
                 const operatorStart = this.positionToOffset(text, child.startPosition);
                 const operatorEnd = this.positionToOffset(text, child.endPosition);
                 
                 const hasSpaceBefore = operatorStart > 0 && text[operatorStart - 1] === ' ';
                 const hasSpaceAfter = operatorEnd < text.length && text[operatorEnd] === ' ';
-                
-                console.log(`Operator '${operatorText}' spacing - before:`, hasSpaceBefore, 'after:', hasSpaceAfter);
-                
+                                
                 if (!hasSpaceBefore || !hasSpaceAfter) {
                     const range = new vscode.Range(
                         document.positionAt(operatorStart),
@@ -411,6 +481,119 @@ export class Lint40Extension {
         }
     }
 
+    private checkGlobalVars(tree: any, document: vscode.TextDocument, diagnostics:vscode.Diagnostic[]) {
+        const query = new Parser.Query(C, '(translation_unit (declaration) @global_decl)');
+        const captures = query.captures(tree.rootNode);
+        
+        for (const capture of captures) {
+            const n = capture.node;
+            
+            const isConst = n.text.includes('const');
+            const isFunctionDecl = this.findChildByType(n, 'function_declarator');
+            const isPointerDecl = this.findChildByType(n, 'pointer_declarator'); // might be buggy yet
+            
+            
+            const hasInit = this.findChildByType(n, 'init_declarator');
+            const hasDeclarator = this.findChildByType(n, 'declarator');
+            const isLiteralInit = hasInit && /=\s*[\d"']/.test(hasInit.text);
+
+            if ((hasInit || hasDeclarator) && !isConst && !isFunctionDecl && !isPointerDecl && !isLiteralInit) {
+                const range = new vscode.Range(n.startPosition.row, n.startPosition.column, n.endPosition.row, n.endPosition.column);
+                const diagnostic = new vscode.Diagnostic(
+                    range, 
+                    `Avoid global mutable variables. Use function parameters or local variables instead.`, 
+                    vscode.DiagnosticSeverity.Warning
+                );
+                diagnostic.code = 'global-variable';
+                diagnostic.source = 'lint40';
+                diagnostics.push(diagnostic);
+            }
+        }
+    }
+
+    private checkDocumentation(tree: any, document: vscode.TextDocument, diagnostics:vscode.Diagnostic[]) {
+        const text = document.getText();
+        
+        const queries = [
+            { name: 'function', query: '(function_definition) @func' },
+            { name: 'struct', query: '(struct_specifier) @struct' },
+        ];
+        
+        for (const queryInfo of queries) {
+            const query = new Parser.Query(C, queryInfo.query);
+            const captures = query.captures(tree.rootNode);
+            
+            for (const capture of captures) {
+                if (queryInfo.name === 'function') {
+                    if (capture.node.startPosition.row > 0) {
+                        const lineBefore = document.lineAt(capture.node.startPosition.row - 1).text.trim();
+                        if (!lineBefore.endsWith('**/')) {
+                            const funcLine = document.lineAt(capture.node.startPosition.row);
+                            const range = new vscode.Range(capture.node.startPosition.row, 
+                                0,
+                                capture.node.startPosition.row,
+                                funcLine.text.length);
+                            const diagnostic = new vscode.Diagnostic(
+                                range,
+                                `This function is missing a contract.`,
+                                vscode.DiagnosticSeverity.Information
+                            );
+                            diagnostic.code = 'documentation';
+                            diagnostic.source = 'lint40';
+                            diagnostics.push(diagnostic);
+                        }
+                    } else {
+                        const funcLine = document.lineAt(capture.node.startPosition.row);
+                        const range = new vscode.Range(capture.node.startPosition.row, 
+                                0,
+                                capture.node.startPosition.row,
+                                funcLine.text.length);
+                            const diagnostic = new vscode.Diagnostic(
+                                range,
+                                `This function is missing a contract.`,
+                                vscode.DiagnosticSeverity.Information
+                            );
+                            diagnostic.code = 'documentation';
+                            diagnostic.source = 'lint40';
+                            diagnostics.push(diagnostic);
+                    }
+                    
+                } else {
+                    if (capture.node.startPosition.row > 0) {
+                        const lineBefore = document.lineAt(capture.node.startPosition.row - 1).text.trim();
+                        if (lineBefore !== '*/') {
+                            const range = new vscode.Range(capture.node.startPosition.row, 
+                                capture.node.startPosition.column,
+                                capture.node.startPosition.row,
+                                capture.node.endPosition.column);
+                            const diagnostic = new vscode.Diagnostic(
+                                range,
+                                `This struct is missing documentation.`,
+                                vscode.DiagnosticSeverity.Information
+                            );
+                            diagnostic.code = 'documentation';
+                            diagnostic.source = 'lint40';
+                            diagnostics.push(diagnostic);
+                        }
+                    } else {
+                        const range = new vscode.Range(capture.node.startPosition.row, 
+                                capture.node.startPosition.column,
+                                capture.node.startPosition.row,
+                                capture.node.endPosition.column);
+                        const diagnostic = new vscode.Diagnostic(
+                            range,
+                            `This struct is missing documentation.`,
+                            vscode.DiagnosticSeverity.Information
+                        );
+                        diagnostic.code = 'documentation';
+                        diagnostic.source = 'lint40';
+                        diagnostics.push(diagnostic);
+                    }
+                    
+                }
+            }
+        }
+    }
 
     private findChildByType(node: any, type: string): any {
         for (let i = 0; i < node.childCount; i++) {
@@ -572,7 +755,7 @@ export class Lint40Extension {
 
     
 
-    private checkBooleanComparisons(line: string, lineIndex: number, diagnostics: vscode.Diagnostic[], document: vscode.TextDocument) {
+    private checkBooleanComparisons(line: string, lineIndex: number, diagnostics: vscode.Diagnostic[]) {
         const boolComparisonRegex = /(\w+)\s*(==|!=)\s*(true|false)/g;
         let match;
         
@@ -595,6 +778,23 @@ export class Lint40Extension {
                 vscode.DiagnosticSeverity.Information
             );
             diagnostic.code = 'boolean-comparison';
+            diagnostic.source = 'lint40';
+            diagnostics.push(diagnostic);
+        }
+    }
+
+    private checkTrailing(line: string, lineIndex: number, diagnostics: vscode.Diagnostic[]) {
+        const trailingSpaceRegex = /\s+$/;
+        let match = trailingSpaceRegex.exec(line);
+
+        if (match){
+            const range = new vscode.Range(lineIndex, match.index, lineIndex, line.length);
+            const diagnostic = new vscode.Diagnostic(
+                range,
+                `Remove trailing whitespace`,
+                vscode.DiagnosticSeverity.Information
+            );
+            diagnostic.code = 'trailing-whitespace';
             diagnostic.source = 'lint40';
             diagnostics.push(diagnostic);
         }
