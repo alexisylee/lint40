@@ -48,9 +48,9 @@ export class ContractGenerator {
         const query = new Parser.Query(C, '(function_definition) @func');
         const captures = query.captures(tree.rootNode);
         let contractsGenerated = 0;
-
-        for (const capture of captures) {
-            const funcNode = capture.node;
+        
+        for (let i = captures.length - 1; i >= 0; i--) {
+            const funcNode = captures[i].node;
             
             if (funcNode.startPosition.row > 0) {
                 const lineBefore = document.lineAt(funcNode.startPosition.row - 1).text.trim();
@@ -59,43 +59,52 @@ export class ContractGenerator {
                 }
             }
 
-            let funcname;
-            const declarator = this.findChildByType(funcNode, 'function_declarator');
-            if (declarator) {
-                const identifier = this.findChildByType(declarator, 'identifier');
-                funcname = identifier ? identifier.text : 'unknown_function';
+            let funcname = 'unknown_function';
+            const identifier = this.findFunctionIdentifier(funcNode);
+            if (identifier) {
+                funcname = identifier.text;
             }
 
             const params = this.extractParams(funcNode);
-            let paramSection = params.length > 0 ? `` : `None`;
+
+            let paramSection = params.length > 0 ? `` : ` *      None\n`;
             for (const param of params) {
-                    paramSection += `      ${param}: [DESCRIPTION]` + '\n *';
+                paramSection += ` *      ${param}: [DESCRIPTION]\n`;
             }
             
             const extractedNotes = this.analyzeFunctionBody(funcNode);
-            let notes = extractedNotes.length > 0 ? `` : `None`;
+            let notes = extractedNotes.length > 0 ? `` : ` *      None`;
             for (const note of extractedNotes) {
-                notes += `      [NOTE "${note}"]` + '\n *';
+                notes += ` *      [NOTE "${note}"]\n`;
             }
 
-            const contractTemplate = `/******* ${funcname} *******
+            const contractTemplate = `
+/******* ${funcname} *******
  *
  * [PURPOSE]
  *
  * Parameters:
- *${paramSection}
+${paramSection}
  * Return: [RETURN]
  *
  * Expects: [EXPECTS]
  *
  * Notes:
- *${notes}
- *********${`*`.repeat(funcname.length)}********/`;
+${notes}
+ *********${`*`.repeat(funcname.length)}********/
+`;
+            
             await editor.edit(editBuilder => {
-                editBuilder.insert(new vscode.Position(funcNode.startPosition.row - 1, funcNode.startPosition.column), contractTemplate);
+                editBuilder.insert(new vscode.Position(funcNode.startPosition.row, 0), contractTemplate);
             });
-
-            vscode.window.showInformationMessage('Function contracts generated! Fill in the bracketed sections.');
+            
+            contractsGenerated++;
+        }
+        
+        if (contractsGenerated > 0) {
+            vscode.window.showInformationMessage(`Generated ${contractsGenerated} function contract(s)!`);
+        } else {
+            vscode.window.showInformationMessage(`No functions found that need contracts. All functions are already documented!`);
         }
     }
 
@@ -105,11 +114,16 @@ export class ContractGenerator {
             return;
         }
 
-        const query = new Parser.Query(C, '(struct_specifier) @struct');
+        const query = new Parser.Query(C, `
+        (struct_specifier 
+            name: (type_identifier) 
+            body: (field_declaration_list)) @struct
+        `);
         const captures = query.captures(tree.rootNode);
         let contractsGenerated = 0;
 
-        for (const capture of captures) {
+        for (let i = captures.length - 1; i >= 0; i--) {
+            const capture = captures[i];
             const structNode = capture.node;
             
             if (structNode.startPosition.row > 0) {
@@ -131,7 +145,8 @@ export class ContractGenerator {
                 }
             }
 
-            const docTemplate = `/* ${name}
+            const docTemplate = `
+/* ${name}
  *
  * [DESCRIPTION]
  *
@@ -139,21 +154,26 @@ export class ContractGenerator {
  *${fields}
  * Invariants: [DESCRIBE INVARIANTS]
  *
- */`;
+ */
+`;
             await editor.edit(editBuilder => {
                 editBuilder.insert(new vscode.Position(structNode.startPosition.row - 1, structNode.startPosition.column), docTemplate);
             });
 
+            contractsGenerated++;
+        }
+        if (contractsGenerated > 0) {
             vscode.window.showInformationMessage('Struct documentation generated! Fill in the bracketed sections.');
-
+        } else {
+            vscode.window.showInformationMessage(`No struct definitions found that need documentation.`);
         }
     }
 
-    private static extractParams(node: any): Array<string>  {
-        const params: Array<string> = [];
-        const declarator = this.findChildByType(node, 'function_declarator');
+    private static extractParams(node: any): Array<string> {
+        const params: Array<string> = [];        
+        const declarator = ContractGenerator.findFunctionDeclarator(node);
         if (declarator) {
-            const paramList = this.findChildByType(declarator, 'parameter_list');
+            const paramList = ContractGenerator.findChildByType(declarator, 'parameter_list');
             if (paramList) {
                 for (let i = 0; i < paramList.childCount; i++) {
                     const child = paramList.child(i);
@@ -164,6 +184,23 @@ export class ContractGenerator {
             }
         }
         return params;
+    }
+
+    private static findFunctionDeclarator(node: any): any {
+        if (node.type === 'function_declarator') {
+            return node;
+        }
+        
+        for (let i = 0; i < node.childCount; i++) {
+            const child = node.child(i);
+            if (child) {
+                const result = ContractGenerator.findFunctionDeclarator(child);
+                if (result) {
+                    return result;
+                }
+            }
+        }
+        return null;
     }
 
     private static findChildByType(node: any, type: string): any {
@@ -197,6 +234,22 @@ export class ContractGenerator {
         return [...assertMatches, ...mallocMatches, ...freeMatches, ...customMatches, ...exitMatches];
     }
 
+    private static findFunctionIdentifier(node: any): any {
+    if (node.type === 'function_declarator') {
+        return this.findChildByType(node, 'identifier');
+    }
     
+    for (let i = 0; i < node.childCount; i++) {
+        const child = node.child(i);
+        if (child) {
+            const result = this.findFunctionIdentifier(child);
+            if (result) {
+                return result;
+            }
+        }
+    }
+    
+    return null;
+}
 }
 

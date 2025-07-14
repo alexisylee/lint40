@@ -160,6 +160,7 @@ export class Lint40Extension {
     private stripComments(line: string): string {
         let cleaned = line.replace(/\/\/.*$/, '');
         cleaned = cleaned.replace(/\/\*.*?\*\//g, '');
+        cleaned = cleaned.replace(/^\s*\*.*$/, '');
         return cleaned;
     }
 
@@ -191,29 +192,33 @@ export class Lint40Extension {
                 
             }
             this.checkDocumentation(tree, document, diagnostics);
+            this.checkNestingDepth(tree, document, diagnostics);
         }
 
         this.checkOperatorSpacing(tree, document, diagnostics);
         this.checkBraceRules(tree, document, diagnostics);
-        this.checkGlobalVars(tree, document, diagnostics);
-        
+        // this.checkGlobalVars(tree, document, diagnostics);
         
     
         lines.forEach((line, lineIndex) => {
-            const onlyWhitespaceRegex = /^\s+$/;
-            if (line.match(onlyWhitespaceRegex)) {
-                const range = new vscode.Range(lineIndex, 0, lineIndex, line.length);
-                const diagnostic = new vscode.Diagnostic(
-                    range,
-                    `Blank lines should not contain spaces or tabs`,
-                    vscode.DiagnosticSeverity.Information
-                );
-                diagnostic.code = 'blank-line-spaces';
-                diagnostic.source = 'lint40';
-                diagnostics.push(diagnostic);
-            }
+            const cleanLine = this.stripComments(line);
+            
             if (this.currentMode === LintMode.REVIEW) {
+                const onlyWhitespaceRegex = /^\s+$/;
+                if (line.match(onlyWhitespaceRegex)) {
+                    const range = new vscode.Range(lineIndex, 0, lineIndex, line.length);
+                    const diagnostic = new vscode.Diagnostic(
+                        range,
+                        `Blank lines should not contain spaces or tabs`,
+                        vscode.DiagnosticSeverity.Information
+                    );
+                    diagnostic.code = 'blank-line-spaces';
+                    diagnostic.source = 'lint40';
+                    diagnostics.push(diagnostic);
+                }
                 this.checkCommentStyle(line, lineIndex, diagnostics);
+                this.checkBooleanComparisons(cleanLine, lineIndex, diagnostics);
+                this.checkTrailing(line, lineIndex, diagnostics);
                 // more to come...
             }
             const trimmed = this.stripComments(line.trim());
@@ -252,10 +257,11 @@ export class Lint40Extension {
                 diagnostics.push(diagnostic);
             }
 
-            if (line.includes('\t')) {
-                const tabIndex = line.indexOf('\t');
-                const range = new vscode.Range(lineIndex, tabIndex, lineIndex, tabIndex + 1);
-                const diagnostic = new vscode.Diagnostic (
+            const tabRegex = /\t/g;
+            let match;
+            while ((match = tabRegex.exec(line)) !== null) {
+                const range = new vscode.Range(lineIndex, match.index, lineIndex, match.index + 1);
+                const diagnostic = new vscode.Diagnostic(
                     range,
                     `Your code must not contain tab characters.`,
                     vscode.DiagnosticSeverity.Information
@@ -265,14 +271,11 @@ export class Lint40Extension {
                 diagnostics.push(diagnostic);
             }
 
-            const cleanLine = this.stripComments(line);
             this.checkPointerStyle(cleanLine, lineIndex, diagnostics);
             this.checkBraceSpacing(cleanLine, lineIndex, diagnostics);
             this.checkCommaSpacing(cleanLine, lineIndex, diagnostics);
             this.checkForLoopSpacing(cleanLine, line, lineIndex, diagnostics);
             this.checkKeywordSpacing(cleanLine, lineIndex, diagnostics); // check if redundant
-            this.checkBooleanComparisons(cleanLine, lineIndex, diagnostics);
-            this.checkTrailing(line, lineIndex, diagnostics);
 
             
             const cleanTrimmed = cleanLine.trim();
@@ -304,7 +307,6 @@ export class Lint40Extension {
 
     private checkOperatorsInNode(node: any, text: string, document: vscode.TextDocument, diagnostics: vscode.Diagnostic[]) {
         const operatorsNeedingSpaces = ['=', '+', '-', '*', '/', '%', '<', '>', '<=', '>=', '==', '!=', '&&', '||', '?', ':'];
-        
         for (let i = 0; i < node.childCount; i++) {
             const child = node.child(i);
             if (!child) continue;
@@ -315,12 +317,12 @@ export class Lint40Extension {
                 continue;
             }
             
-            if (operatorsNeedingSpaces.includes(operatorText)) {                
+            if (operatorsNeedingSpaces.includes(operatorText)) {
                 const operatorStart = this.positionToOffset(text, child.startPosition);
                 const operatorEnd = this.positionToOffset(text, child.endPosition);
                 
-                const hasSpaceBefore = operatorStart > 0 && text[operatorStart - 1] === ' ';
-                const hasSpaceAfter = operatorEnd < text.length && text[operatorEnd] === ' ';
+                const hasSpaceBefore = operatorStart > 0 && (text[operatorStart - 1] === ' ' || text[operatorStart - 1] === '\n');
+                const hasSpaceAfter = operatorEnd < text.length && (text[operatorEnd] === ' ' || text[operatorEnd] === '\n');
                                 
                 if (!hasSpaceBefore || !hasSpaceAfter) {
                     const range = new vscode.Range(
@@ -502,7 +504,7 @@ export class Lint40Extension {
                 const diagnostic = new vscode.Diagnostic(
                     range, 
                     `Avoid global mutable variables. Use function parameters or local variables instead.`, 
-                    vscode.DiagnosticSeverity.Warning
+                    vscode.DiagnosticSeverity.Information
                 );
                 diagnostic.code = 'global-variable';
                 diagnostic.source = 'lint40';
@@ -516,7 +518,7 @@ export class Lint40Extension {
         
         const queries = [
             { name: 'function', query: '(function_definition) @func' },
-            { name: 'struct', query: '(struct_specifier) @struct' },
+            { name: 'struct', query: '(struct_specifier name: _ body: (field_declaration_list) @struct)'},
         ];
         
         for (const queryInfo of queries) {
@@ -563,7 +565,7 @@ export class Lint40Extension {
                         const lineBefore = document.lineAt(capture.node.startPosition.row - 1).text.trim();
                         if (lineBefore !== '*/') {
                             const range = new vscode.Range(capture.node.startPosition.row, 
-                                capture.node.startPosition.column,
+                                0,
                                 capture.node.startPosition.row,
                                 capture.node.endPosition.column);
                             const diagnostic = new vscode.Diagnostic(
@@ -594,6 +596,67 @@ export class Lint40Extension {
             }
         }
     }
+
+    private checkNestingDepth(tree: any, document: vscode.TextDocument, diagnostics: vscode.Diagnostic[]) {
+        const maxDepth = 3;
+        
+        const query = new Parser.Query(C, `
+            [
+                (if_statement) @control
+                (for_statement) @control
+                (while_statement) @control
+                (do_statement) @control
+                (switch_statement) @control
+            ]
+        `);
+        
+        const captures = query.captures(tree.rootNode);
+        
+        for (const capture of captures) {
+            const controlNode = capture.node;
+            const depth = this.calculateControlNestingDepth(controlNode);
+            
+            if (depth > maxDepth) {
+                const range = new vscode.Range(
+                    controlNode.startPosition.row,
+                    controlNode.startPosition.column,
+                    controlNode.startPosition.row,
+                    controlNode.startPosition.column + 5
+                );
+                
+                const diagnostic = new vscode.Diagnostic(
+                    range,
+                    `Control structure nesting depth of ${depth} exceeds maximum of ${maxDepth}. Consider refactoring.`,
+                    vscode.DiagnosticSeverity.Information
+                );
+                diagnostic.code = 'excessive-nesting';
+                diagnostic.source = 'lint40';
+                diagnostics.push(diagnostic);
+            }
+        }
+    }
+
+    private calculateControlNestingDepth(node: any): number {
+        let depth = 1;
+        let currentNode = node.parent;
+        const controlTypes = [
+            'if_statement',
+            'for_statement', 
+            'while_statement',
+            'do_statement',
+            'switch_statement'
+        ];
+
+        while (currentNode) {
+            if (controlTypes.includes(currentNode.type)) {
+                depth++;
+            }
+            currentNode = currentNode.parent;
+        }
+        
+        return depth;
+    }
+
 
     private findChildByType(node: any, type: string): any {
         for (let i = 0; i < node.childCount; i++) {

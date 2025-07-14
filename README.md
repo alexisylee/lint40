@@ -1,71 +1,33 @@
 # lint40 README
 
-This is the README for your extension "lint40". After writing up a brief description, we recommend including the following sections.
+A Comprehensive C linter enforcing course coding standards with contract generation and dual-mode checking
 
 ## Features
 
-Describe specific features of your extension including screenshots of your extension in action. Image paths are relative to this README file.
+✅ **Two Modes**: Draft mode (basic checks) and Review mode (submission-ready validation)
+✅ **Style Enforcement**: Curly braces spacing, 8-space indentation, operator spacing
+✅ **Contract Generation**: Auto-generate function and file headers with templates
+✅ **Code Quality Checks**: Prevent poor practices like global variables, excessive nesting, and style violations
 
-For example if there is an image subfolder under your extension project workspace:
+## Usage
 
-\!\[feature X\]\(images/feature-x.png\)
+1. Install the extension
+2. Open any `.c` file
+3. Click the status bar to toggle between Draft/Review modes
+4. Use `Ctrl+Shift+P` → "Generate Function Contract", "Generate File Header", or "Generate Struct Documentation" for templates
 
-> Tip: Many popular extensions utilize animations. This is an excellent way to show off your extension! We recommend short, focused animations that are easy to follow.
+## Screenshots
+
+![Status Bar](images/status.jpg)
+![Linting Example in Draft Mode](images/d.png)
+![Linting Example in Review Mode](images/review.png)
+![Documentation Templace Example](images/template.png)
 
 ## Requirements
 
-If you have any requirements or dependencies, add a section describing those and how to install and configure them.
-
-## Extension Settings
-
-Include if your extension adds any VS Code settings through the `contributes.configuration` extension point.
-
-For example:
-
-This extension contributes the following settings:
-
-* `myExtension.enable`: Enable/disable this extension.
-* `myExtension.thing`: Set to `blah` to do something.
-
-## Known Issues
-
-Calling out known issues can help limit users opening duplicate issues against your extension.
-
-## Release Notes
-
-Users appreciate release notes as you update your extension.
+- VS Code 1.101.0 or higher
+- C files (.c extension)
 
 ### 1.0.0
 
-Initial release of ...
-
-### 1.0.1
-
-Fixed issue #.
-
-### 1.1.0
-
-Added features X, Y, and Z.
-
----
-
-## Following extension guidelines
-
-Ensure that you've read through the extensions guidelines and follow the best practices for creating your extension.
-
-* [Extension Guidelines](https://code.visualstudio.com/api/references/extension-guidelines)
-
-## Working with Markdown
-
-You can author your README using Visual Studio Code. Here are some useful editor keyboard shortcuts:
-
-* Split the editor (`Cmd+\` on macOS or `Ctrl+\` on Windows and Linux).
-* Toggle preview (`Shift+Cmd+V` on macOS or `Shift+Ctrl+V` on Windows and Linux).
-* Press `Ctrl+Space` (Windows, Linux, macOS) to see a list of Markdown snippets.
-
-## For more information
-
-* [Visual Studio Code's Markdown Support](http://code.visualstudio.com/docs/languages/markdown)
-* [Markdown Syntax Reference](https://help.github.com/articles/markdown-basics/)
-
-**Enjoy!**
+Initial release
